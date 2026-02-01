@@ -1,0 +1,89 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String       @id @default(cuid())
+  email         String       @unique
+  passwordHash  String       // bcrypt hashed password
+  name          String?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  persona       String?      // "student" | "freelancer" | "general"
+  monthlyFixedCosts Float?   // Optional monthly fixed costs
+  riskTolerance String?      // Optional risk tolerance setting
+  plaidItems    PlaidItem[]
+  goals         Goal[]
+}
+
+model PlaidItem {
+  id            String       @id @default(cuid())
+  userId        String
+  user          User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken   String       @unique // Stored server-side only
+  institutionId String
+  institutionName String?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  lastSyncedAt  DateTime?
+  transactions  Transaction[]
+  recurringCharges RecurringCharge[]
+}
+
+model Transaction {
+  id            String       @id @default(cuid())
+  plaidItemId   String
+  plaidItem     PlaidItem   @relation(fields: [plaidItemId], references: [id], onDelete: Cascade)
+  plaidId       String       @unique // Plaid transaction ID
+  amount        Float        // Positive for income, negative for expenses
+  date          DateTime
+  name          String
+  category      String?      // Normalized category
+  merchantName  String?
+  accountId     String?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  recurringChargeId String?
+  recurringCharge RecurringCharge? @relation(fields: [recurringChargeId], references: [id])
+
+  @@index([plaidItemId])
+  @@index([date])
+  @@index([category])
+}
+
+model RecurringCharge {
+  id            String       @id @default(cuid())
+  plaidItemId   String
+  plaidItem     PlaidItem   @relation(fields: [plaidItemId], references: [id], onDelete: Cascade)
+  name          String
+  amount        Float
+  frequency     String       // "monthly" | "weekly" | "yearly"
+  confidence    Float        // 0.0 to 1.0
+  status        String       @default("active") // "active" | "cancelled" | "unsure"
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  transactions  Transaction[]
+
+  @@index([plaidItemId])
+}
+
+model Goal {
+  id            String       @id @default(cuid())
+  userId        String
+  user          User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name          String
+  targetAmount  Float
+  targetDate    DateTime
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  @@index([userId])
+}
