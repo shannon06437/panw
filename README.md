@@ -91,3 +91,6 @@ When testing with Plaid Sandbox:
 - Access tokens are stored server-side only
 - Client never sees Plaid secrets
 - Raw transaction data is never sent to LLMs (only aggregates)
+
+## Demo video link
+https://youtu.be/wvP0u6zHmxc
