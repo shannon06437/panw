@@ -46,6 +46,10 @@ DATABASE_URL="file:./dev.db"
 PLAID_CLIENT_ID=your_plaid_client_id_here
 PLAID_SECRET=your_plaid_secret_here
 PLAID_ENV=sandbox
+
+# OpenAI Configuration (for AI insights)
+OPENAI_API_KEY=your_openai_api_key_here
+OPENAI_MODEL=gpt-4o-mini
 ```
 
 **Important:** Replace `your_plaid_client_id_here` and `your_plaid_secret_here` with your actual Plaid credentials.

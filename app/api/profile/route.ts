@@ -25,6 +25,16 @@ export async function GET(request: NextRequest) {
       )
     }
 
+    // Parse coachingGuidelines if present
+    let coachingGuidelines = null
+    if (user.coachingGuidelines) {
+      try {
+        coachingGuidelines = JSON.parse(user.coachingGuidelines)
+      } catch (e) {
+        console.error('Error parsing coachingGuidelines:', e)
+      }
+    }
+
     return NextResponse.json({
       id: user.id,
       email: user.email,
@@ -32,6 +42,7 @@ export async function GET(request: NextRequest) {
       persona: user.persona,
       monthlyFixedCosts: user.monthlyFixedCosts,
       riskTolerance: user.riskTolerance,
+      coachingGuidelines,
       hasConnectedAccount: user.plaidItems.length > 0,
       plaidItems: user.plaidItems,
     })
@@ -47,35 +58,43 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const userId = request.headers.get('x-user-id') || 'default-user'
-    const { persona, monthlyFixedCosts, riskTolerance } = await request.json()
+    const { persona, monthlyFixedCosts, riskTolerance, coachingGuidelines } = await request.json()
 
     // Check if user exists
     let user = await prisma.user.findUnique({
       where: { id: userId },
     })
 
+    const updateData: any = {}
+    if (persona !== undefined) updateData.persona = persona || null
+    if (monthlyFixedCosts !== undefined) updateData.monthlyFixedCosts = monthlyFixedCosts || null
+    if (riskTolerance !== undefined) updateData.riskTolerance = riskTolerance || null
+    if (coachingGuidelines !== undefined) {
+      updateData.coachingGuidelines = coachingGuidelines ? (typeof coachingGuidelines === 'string' ? coachingGuidelines : JSON.stringify(coachingGuidelines)) : null
+    }
+
     if (!user) {
       user = await prisma.user.create({
         data: {
           id: userId,
-          persona: persona || null,
-          monthlyFixedCosts: monthlyFixedCosts || null,
-          riskTolerance: riskTolerance || null,
+          ...updateData,
         },
       })
     } else {
       user = await prisma.user.update({
         where: { id: userId },
-        data: {
-          persona: persona !== undefined ? persona : user.persona,
-          monthlyFixedCosts:
-            monthlyFixedCosts !== undefined
-              ? monthlyFixedCosts
-              : user.monthlyFixedCosts,
-          riskTolerance:
-            riskTolerance !== undefined ? riskTolerance : user.riskTolerance,
-        },
+        data: updateData,
       })
+    }
+
+    // Parse coachingGuidelines for response
+    let parsedCoachingGuidelines = null
+    if (user.coachingGuidelines) {
+      try {
+        parsedCoachingGuidelines = JSON.parse(user.coachingGuidelines)
+      } catch (e) {
+        console.error('Error parsing coachingGuidelines:', e)
+      }
     }
 
     return NextResponse.json({
@@ -87,6 +106,7 @@ export async function POST(request: NextRequest) {
         persona: user.persona,
         monthlyFixedCosts: user.monthlyFixedCosts,
         riskTolerance: user.riskTolerance,
+        coachingGuidelines: parsedCoachingGuidelines,
       },
     })
   } catch (error) {

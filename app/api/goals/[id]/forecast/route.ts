@@ -3,11 +3,11 @@ import { prisma } from '@/lib/prisma'
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const userId = request.headers.get('x-user-id') || 'default-user'
-    const goalId = params.id
+    const { id: goalId } = await params
 
     // Get goal
     const goal = await prisma.goal.findUnique({
@@ -51,24 +51,45 @@ export async function GET(
 
     const allTransactions = user.plaidItems.flatMap((item) => item.transactions)
 
-    // Calculate average monthly net (income - expenses) from last 3 months
+    // Calculate deterministic feasibility
     const now = new Date()
+    const targetDate = new Date(goal.targetDate)
+    
+    // Calculate months remaining
+    const monthsRemaining = Math.max(
+      1,
+      Math.ceil(
+        (targetDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24 * 30)
+      )
+    )
+
+    // Calculate required per month
+    const requiredPerMonth = goal.targetAmount / monthsRemaining
+
+    // Calculate baseline surplus from last 3 months
     const threeMonthsAgo = new Date(now)
     threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3)
 
     const recentTransactions = allTransactions.filter(
-      (t) => t.date >= threeMonthsAgo
+      (t) => {
+        const txnDate = t.date instanceof Date ? t.date : new Date(t.date)
+        return txnDate >= threeMonthsAgo
+      }
     )
 
-    const monthlyData: { month: number; net: number }[] = []
+    const monthlyData: { month: string; income: number; spend: number; net: number }[] = []
     for (let i = 2; i >= 0; i--) {
       const monthDate = new Date(now)
       monthDate.setMonth(monthDate.getMonth() - i)
       
       const monthTxns = recentTransactions.filter(
-        (t) =>
-          t.date.getMonth() === monthDate.getMonth() &&
-          t.date.getFullYear() === monthDate.getFullYear()
+        (t) => {
+          const txnDate = t.date instanceof Date ? t.date : new Date(t.date)
+          return (
+            txnDate.getMonth() === monthDate.getMonth() &&
+            txnDate.getFullYear() === monthDate.getFullYear()
+          )
+        }
       )
 
       const income = monthTxns.filter((t) => t.amount > 0).reduce((sum, t) => sum + t.amount, 0)
@@ -77,40 +98,33 @@ export async function GET(
       )
       const net = income - expenses
 
+      const monthStr = `${monthDate.getFullYear()}-${String(monthDate.getMonth() + 1).padStart(2, '0')}`
       monthlyData.push({
-        month: i,
-        net,
+        month: monthStr,
+        income: Math.round(income * 100) / 100,
+        spend: Math.round(expenses * 100) / 100,
+        net: Math.round(net * 100) / 100,
       })
     }
 
-    const avgMonthlyNet = monthlyData.length > 0
+    const baselineSurplusPerMonth = monthlyData.length > 0
       ? monthlyData.reduce((sum, m) => sum + m.net, 0) / monthlyData.length
       : 0
 
-    // Calculate time to goal
-    const targetDate = new Date(goal.targetDate)
-    const monthsRemaining = Math.max(
-      1,
-      Math.ceil(
-        (targetDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24 * 30)
-      )
-    )
 
-    // Calculate required monthly savings
-    const requiredMonthlySavings = goal.targetAmount / monthsRemaining
+    const gapPerMonth = requiredPerMonth - baselineSurplusPerMonth
+    const status = gapPerMonth <= 0 ? 'on_track' : 'off_track'
 
     // Estimate current progress (assume 0 for now, could be enhanced with actual savings tracking)
     const currentProgress = 0
     const gap = goal.targetAmount - currentProgress
 
-    // Calculate on-track probability
-    // If avgMonthlyNet >= requiredMonthlySavings, high probability
-    // Otherwise, scale based on how close they are
+    // Calculate on-track probability based on feasibility
     let onTrackProbability = 0.5
-    if (avgMonthlyNet >= requiredMonthlySavings) {
+    if (baselineSurplusPerMonth >= requiredPerMonth) {
       onTrackProbability = 0.9
-    } else if (avgMonthlyNet > 0) {
-      onTrackProbability = Math.min(0.8, 0.5 + (avgMonthlyNet / requiredMonthlySavings) * 0.3)
+    } else if (baselineSurplusPerMonth > 0) {
+      onTrackProbability = Math.min(0.8, 0.5 + (baselineSurplusPerMonth / requiredPerMonth) * 0.3)
     } else {
       onTrackProbability = 0.2
     }
@@ -118,8 +132,8 @@ export async function GET(
     // Calculate recommended levers
     const levers: Array<{ action: string; impact: number; description: string }> = []
 
-    if (avgMonthlyNet < requiredMonthlySavings) {
-      const shortfall = requiredMonthlySavings - avgMonthlyNet
+    if (baselineSurplusPerMonth < requiredPerMonth) {
+      const shortfall = requiredPerMonth - baselineSurplusPerMonth
       
       // Suggest reducing expenses
       if (shortfall > 0) {
@@ -138,7 +152,7 @@ export async function GET(
       })
 
       // Suggest extending timeline
-      const extendedMonths = Math.ceil(goal.targetAmount / Math.max(avgMonthlyNet, 1))
+      const extendedMonths = Math.ceil(goal.targetAmount / Math.max(baselineSurplusPerMonth, 1))
       if (extendedMonths > monthsRemaining) {
         levers.push({
           action: 'Extend target date',
@@ -162,13 +176,20 @@ export async function GET(
         targetDate: goal.targetDate,
       },
       forecast: {
-        requiredMonthlySavings: Math.round(requiredMonthlySavings * 100) / 100,
+        requiredMonthlySavings: Math.round(requiredPerMonth * 100) / 100,
         currentProgress,
         gap: Math.round(gap * 100) / 100,
         monthsRemaining,
         onTrackProbability: Math.round(onTrackProbability * 100) / 100,
-        avgMonthlyNet: Math.round(avgMonthlyNet * 100) / 100,
+        avgMonthlyNet: Math.round(baselineSurplusPerMonth * 100) / 100,
       },
+      feasibility: {
+        requiredPerMonth: Math.round(requiredPerMonth * 100) / 100,
+        estimatedSurplusPerMonth: Math.round(baselineSurplusPerMonth * 100) / 100,
+        gapPerMonth: Math.round(gapPerMonth * 100) / 100,
+        status,
+      },
+      historySummary: monthlyData,
       recommendedLevers: levers,
     })
   } catch (error) {

@@ -20,6 +20,7 @@ model User {
   persona       String?      // "student" | "freelancer" | "general"
   monthlyFixedCosts Float?   // Optional monthly fixed costs
   riskTolerance String?      // Optional risk tolerance setting
+  coachingGuidelines String?  // JSON string of coaching preferences: {style: string[], additional_notes: string}
   plaidItems    PlaidItem[]
   goals         Goal[]
 }
@@ -36,19 +37,46 @@ model PlaidItem {
   lastSyncedAt  DateTime?
   transactions  Transaction[]
   recurringCharges RecurringCharge[]
+  accounts      Account[]
+  incomeSummaries IncomeSummary[]
+}
+
+model Account {
+  id            String       @id @default(cuid())
+  plaidItemId   String
+  plaidItem     PlaidItem   @relation(fields: [plaidItemId], references: [id], onDelete: Cascade)
+  plaidAccountId String     @unique // Plaid account_id
+  name          String
+  officialName  String?
+  type          String       // "depository" | "credit" | "investment" | "loan"
+  subtype       String?      // e.g., "checking", "savings", "credit card"
+  mask          String?      // Last 4 digits
+  balance       Float        // Current balance
+  availableBalance Float?    // Available balance (for depository)
+  limit         Float?       // Credit limit (for credit accounts)
+  currencyCode  String?      // ISO currency code
+  lastSyncedAt  DateTime?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  transactions  Transaction[]
+
+  @@index([plaidItemId])
+  @@index([type])
 }
 
 model Transaction {
   id            String       @id @default(cuid())
   plaidItemId   String
   plaidItem     PlaidItem   @relation(fields: [plaidItemId], references: [id], onDelete: Cascade)
+  accountId     String?      // Reference to Account.id (not Plaid account_id)
+  account       Account?     @relation(fields: [accountId], references: [id], onDelete: SetNull)
   plaidId       String       @unique // Plaid transaction ID
+  plaidAccountId String?     // Plaid account_id (for reference)
   amount        Float        // Positive for income, negative for expenses
   date          DateTime
   name          String
   category      String?      // Normalized category
   merchantName  String?
-  accountId     String?
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
   recurringChargeId String?
@@ -57,6 +85,7 @@ model Transaction {
   @@index([plaidItemId])
   @@index([date])
   @@index([category])
+  @@index([accountId])
 }
 
 model RecurringCharge {
@@ -84,6 +113,42 @@ model Goal {
   targetDate    DateTime
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
+  insights      GoalInsight?
 
   @@index([userId])
+}
+
+model GoalInsight {
+  id                    String       @id @default(cuid())
+  goalId                String       @unique
+  goal                  Goal         @relation(fields: [goalId], references: [id], onDelete: Cascade)
+  summary               String
+  topReasons            String       // JSON array of strings
+  actionPlan            String       // JSON array of action plan items
+  projectedCompletionDate String?    // ISO date string, only if goal is achievable
+  createdAt             DateTime     @default(now())
+  updatedAt             DateTime     @updatedAt
+
+  @@index([goalId])
+}
+
+model IncomeSummary {
+  id            String       @id @default(cuid())
+  plaidItemId   String
+  plaidItem     PlaidItem   @relation(fields: [plaidItemId], references: [id], onDelete: Cascade)
+  bankIncomeId  String?      // Plaid bank_income_id
+  startDate     DateTime
+  endDate       DateTime
+  totalAmount   Float
+  currencyCode  String?
+  incomeSourcesCount Int?
+  incomeCategoriesCount Int?
+  incomeTransactionsCount Int?
+  generatedTime DateTime?
+  lastUpdatedTime DateTime?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  @@index([plaidItemId])
+  @@index([startDate, endDate])
 }

@@ -54,39 +54,23 @@ export interface CashflowSignal {
  * Normalize category names for consistent grouping
  */
 function normalizeCategory(category: string | null): string {
-  if (!category) return 'Uncategorized'
+  if (!category || category === 'Uncategorized') return 'Uncategorized'
   
-  const normalized = category.toLowerCase()
+  const trimmed = category.trim()
   
-  // Map Plaid categories to simplified groups
-  const categoryMap: Record<string, string> = {
-    'food and drink': 'Dining',
-    'restaurants': 'Dining',
-    'fast food': 'Dining',
-    'coffee shops': 'Dining',
-    'shops': 'Shopping',
-    'supermarkets': 'Groceries',
-    'gas stations': 'Gas',
-    'transportation': 'Transportation',
-    'general merchandise': 'Shopping',
-    'entertainment': 'Entertainment',
-    'recreation': 'Entertainment',
-    'travel': 'Travel',
-    'hotels': 'Travel',
-    'air travel': 'Travel',
-    'utilities': 'Utilities',
-    'internet': 'Utilities',
-    'telecommunication services': 'Utilities',
+  // Convert SNAKE_CASE to Title Case (e.g., FOOD_AND_DRINK -> Food And Drink)
+  if (trimmed.includes('_')) {
+    return trimmed
+      .split('_')
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+      .join(' ')
   }
   
-  for (const [key, value] of Object.entries(categoryMap)) {
-    if (normalized.includes(key)) {
-      return value
-    }
-  }
-  
-  // Capitalize first letter
-  return category.charAt(0).toUpperCase() + category.slice(1).toLowerCase()
+  // If already in a readable format, just capitalize first letter of each word
+  return trimmed
+    .split(' ')
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(' ')
 }
 
 /**
@@ -99,20 +83,40 @@ export function detectCategoryTrends(
 ): CategoryTrendSignal[] {
   const signals: CategoryTrendSignal[] = []
   
-  // Filter transactions by month
-  const currentMonthTxns = transactions.filter(
-    (t) =>
-      t.date.getMonth() === currentMonth.getMonth() &&
-      t.date.getFullYear() === currentMonth.getFullYear() &&
-      t.amount < 0 // Only expenses
-  )
+  // Normalize dates for comparison
+  const currentYear = currentMonth.getFullYear()
+  const currentMonthNum = currentMonth.getMonth()
+  const prevYear = previousMonth.getFullYear()
+  const prevMonthNum = previousMonth.getMonth()
   
-  const previousMonthTxns = transactions.filter(
-    (t) =>
-      t.date.getMonth() === previousMonth.getMonth() &&
-      t.date.getFullYear() === previousMonth.getFullYear() &&
+  // Helper to parse dates consistently
+  const parseDate = (d: string | Date): Date => {
+    if (d instanceof Date) return d
+    if (typeof d === 'string' && d.match(/^\d{4}-\d{2}-\d{2}$/)) {
+      const [year, month, day] = d.split('-').map(Number)
+      return new Date(year, month - 1, day) // month is 0-indexed, parse as local date
+    }
+    return new Date(d)
+  }
+
+  // Filter transactions by month
+  const currentMonthTxns = transactions.filter((t) => {
+    const txnDate = parseDate(t.date)
+    return (
+      txnDate.getMonth() === currentMonthNum &&
+      txnDate.getFullYear() === currentYear &&
+      t.amount < 0 // Only expenses
+    )
+  })
+  
+  const previousMonthTxns = transactions.filter((t) => {
+    const txnDate = parseDate(t.date)
+    return (
+      txnDate.getMonth() === prevMonthNum &&
+      txnDate.getFullYear() === prevYear &&
       t.amount < 0
-  )
+    )
+  })
   
   // Group by normalized category
   const currentByCategory = new Map<string, number>()
@@ -286,11 +290,27 @@ export function calculateCashflow(
   transactions: Transaction[],
   currentMonth: Date
 ): CashflowSignal {
-  const monthTxns = transactions.filter(
-    (t) =>
-      t.date.getMonth() === currentMonth.getMonth() &&
-      t.date.getFullYear() === currentMonth.getFullYear()
-  )
+  // Helper to parse dates consistently
+  const parseDate = (d: string | Date): Date => {
+    if (d instanceof Date) return d
+    if (typeof d === 'string' && d.match(/^\d{4}-\d{2}-\d{2}$/)) {
+      const [year, month, day] = d.split('-').map(Number)
+      return new Date(year, month - 1, day) // month is 0-indexed, parse as local date
+    }
+    return new Date(d)
+  }
+
+  // Normalize currentMonth to start of month for comparison
+  const targetYear = currentMonth.getFullYear()
+  const targetMonthNum = currentMonth.getMonth()
+  
+  const monthTxns = transactions.filter((t) => {
+    const txnDate = parseDate(t.date)
+    return (
+      txnDate.getMonth() === targetMonthNum &&
+      txnDate.getFullYear() === targetYear
+    )
+  })
   
   const income = monthTxns
     .filter((t) => t.amount > 0)
@@ -308,12 +328,16 @@ export function calculateCashflow(
   // Compare with previous month for trend
   const previousMonth = new Date(currentMonth)
   previousMonth.setMonth(previousMonth.getMonth() - 1)
+  const prevYear = previousMonth.getFullYear()
+  const prevMonthNum = previousMonth.getMonth()
   
-  const prevMonthTxns = transactions.filter(
-    (t) =>
-      t.date.getMonth() === previousMonth.getMonth() &&
-      t.date.getFullYear() === previousMonth.getFullYear()
-  )
+  const prevMonthTxns = transactions.filter((t) => {
+    const txnDate = parseDate(t.date)
+    return (
+      txnDate.getMonth() === prevMonthNum &&
+      txnDate.getFullYear() === prevYear
+    )
+  })
   
   const prevIncome = prevMonthTxns
     .filter((t) => t.amount > 0)

@@ -21,7 +21,6 @@ export default function SubscriptionsPage() {
   const [recurringCharges, setRecurringCharges] = useState<RecurringCharge[]>([])
   const [monthlyTotal, setMonthlyTotal] = useState(0)
   const [loading, setLoading] = useState(true)
-  const [updating, setUpdating] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [confidenceFilter, setConfidenceFilter] = useState<string>('all')
 
@@ -61,35 +60,6 @@ export default function SubscriptionsPage() {
     }
   }
 
-  const handleStatusChange = async (chargeId: string, newStatus: 'active' | 'cancelled' | 'unsure') => {
-    if (!userId) return
-
-    try {
-      setUpdating(chargeId)
-      setError(null)
-
-      const res = await fetch(`/api/recurring/${chargeId}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-user-id': userId,
-        },
-        body: JSON.stringify({ status: newStatus }),
-      })
-
-      if (!res.ok) {
-        const data = await res.json()
-        throw new Error(data.error || 'Failed to update status')
-      }
-
-      // Reload charges
-      await loadRecurringCharges(userId)
-    } catch (err: any) {
-      setError(err.message || 'Failed to update status')
-    } finally {
-      setUpdating(null)
-    }
-  }
 
   const getMonthlyAmount = (charge: RecurringCharge) => {
     if (charge.frequency === 'monthly') return charge.amount
@@ -216,25 +186,6 @@ export default function SubscriptionsPage() {
                       </span>
                       <span>Based on {charge.transactionCount} transaction{charge.transactionCount !== 1 ? 's' : ''}</span>
                     </div>
-                  </div>
-                  <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                    <select
-                      value={charge.status}
-                      onChange={(e) => handleStatusChange(charge.id, e.target.value as any)}
-                      disabled={updating === charge.id}
-                      style={{
-                        padding: '0.5rem',
-                        border: '2px solid var(--border)',
-                        borderRadius: 'var(--radius-sm)',
-                        background: 'var(--bg-primary)',
-                        cursor: updating === charge.id ? 'not-allowed' : 'pointer',
-                      }}
-                    >
-                      <option value="active">Keep</option>
-                      <option value="cancelled">Cancel</option>
-                      <option value="unsure">Unsure</option>
-                    </select>
-                    {updating === charge.id && <span className="spinner" style={{ width: '16px', height: '16px' }}></span>}
                   </div>
                 </div>
               )

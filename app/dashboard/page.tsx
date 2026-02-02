@@ -4,12 +4,29 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/app/components/ui/Button'
 import { Dropdown } from '@/app/components/ui/Dropdown'
+import { PieChart } from '@/app/components/ui/PieChart'
+
+interface Account {
+  id: string
+  name: string
+  officialName: string | null
+  type: string
+  subtype: string | null
+  mask: string | null
+  balance: number
+  availableBalance: number | null
+  limit: number | null
+  institutionName: string | null
+}
 
 interface DashboardData {
   income: number
   expenses: number
   net: number
+  balance: number
   savingsRate: number | null
+  creditLimit: number | null
+  balanceChange: number | null
   categoryBreakdown: Array<{
     category: string
     amount: number
@@ -22,6 +39,9 @@ interface DashboardData {
     previousMonth: number
   }>
   targetMonth: string
+  accounts: Account[]
+  viewType: 'combined' | 'single'
+  accountType: string | null
 }
 
 export default function DashboardPage() {
@@ -32,6 +52,8 @@ export default function DashboardPage() {
   const [error, setError] = useState<string | null>(null)
   const [selectedMonth, setSelectedMonth] = useState(new Date())
   const [userId, setUserId] = useState<string | null>(null)
+  const [selectedAccountId, setSelectedAccountId] = useState<string>('all')
+  const [allAccounts, setAllAccounts] = useState<Account[]>([])
 
   useEffect(() => {
     // Get userId from localStorage
@@ -41,8 +63,26 @@ export default function DashboardPage() {
       return
     }
     setUserId(storedUserId)
+    loadAccounts(storedUserId)
     loadData(storedUserId)
-  }, [router, selectedMonth])
+  }, [router, selectedMonth, selectedAccountId])
+
+  const loadAccounts = async (uid: string) => {
+    try {
+      const res = await fetch('/api/accounts', {
+        headers: {
+          'x-user-id': uid,
+        },
+      })
+
+      if (res.ok) {
+        const data = await res.json()
+        setAllAccounts(data.accounts || [])
+      }
+    } catch (err) {
+      // Failed to load accounts
+    }
+  }
 
   const loadData = async (uid: string) => {
     try {
@@ -52,18 +92,20 @@ export default function DashboardPage() {
       const month = selectedMonth.getMonth()
       const year = selectedMonth.getFullYear()
 
-      const res = await fetch(`/api/dashboard?month=${month}&year=${year}`, {
-        headers: {
-          'x-user-id': uid,
-        },
-      })
+      const res = await fetch(
+        `/api/dashboard?month=${month}&year=${year}&accountId=${selectedAccountId}`,
+        {
+          headers: {
+            'x-user-id': uid,
+          },
+        }
+      )
 
       if (!res.ok) {
         if (res.status === 404) {
-          // No connected account
-        router.push('/onboarding')
-        return
-      }
+          router.push('/onboarding')
+          return
+        }
         throw new Error('Failed to load dashboard')
       }
 
@@ -89,7 +131,7 @@ export default function DashboardPage() {
           'Content-Type': 'application/json',
           'x-user-id': userId,
         },
-        body: JSON.stringify({ days: 90 }),
+        body: JSON.stringify({ days: 365 }),
       })
 
       if (!res.ok) {
@@ -109,7 +151,8 @@ export default function DashboardPage() {
       document.body.appendChild(successMsg)
       setTimeout(() => successMsg.remove(), 3000)
 
-      // Reload data
+      // Reload accounts and data
+      await loadAccounts(userId)
       await loadData(userId)
     } catch (err: any) {
       setError(err.message || 'Failed to sync')
@@ -211,6 +254,12 @@ export default function DashboardPage() {
       <div style={{ display: 'flex', gap: '1rem', marginBottom: '1.5rem', flexWrap: 'wrap' }}>
         <Button
           variant="outline"
+          onClick={() => router.push('/transactions')}
+        >
+          📄 View Transactions
+        </Button>
+        <Button
+          variant="outline"
           onClick={() => router.push('/subscriptions')}
         >
           📋 View Subscriptions
@@ -222,6 +271,38 @@ export default function DashboardPage() {
           🎯 View Goals
         </Button>
       </div>
+
+      {/* Account Selector */}
+      {allAccounts.length > 0 && (
+        <div style={{ marginBottom: '1.5rem' }}>
+          <label className="label" style={{ marginBottom: '0.5rem' }}>Account View</label>
+          <select
+            className="select"
+            value={selectedAccountId}
+            onChange={(e) => setSelectedAccountId(e.target.value)}
+            style={{ maxWidth: '400px' }}
+          >
+            <option value="all">
+              All Depository Accounts
+              {(() => {
+                const depositoryAccounts = allAccounts.filter((a) => a.type === 'depository')
+                if (depositoryAccounts.length > 0) {
+                  return ` (${depositoryAccounts.map((a) => a.name).join(', ')})`
+                }
+                return ''
+              })()}
+            </option>
+            {allAccounts.map((account) => (
+              <option key={account.id} value={account.id}>
+                {account.name}
+                {account.mask && ` •${account.mask}`}
+                {account.institutionName && ` (${account.institutionName})`}
+                {` - ${account.type.charAt(0).toUpperCase() + account.type.slice(1)}`}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
 
       {/* Month Selector */}
       <div className="month-selector">
@@ -253,53 +334,104 @@ export default function DashboardPage() {
 
       {dashboardData && (
         <>
-          {/* Summary Cards */}
+          {/* Summary Cards - Dynamic based on account type */}
           <div className="grid">
-            <div className="metric-card slide-up">
-              <div className="metric-label">Income</div>
-              <div className="metric-value" style={{ color: 'var(--success)' }}>
-                ${dashboardData.income.toFixed(2)}
-              </div>
-            </div>
-            <div className="metric-card slide-up" style={{ animationDelay: '0.1s' }}>
-              <div className="metric-label">Expenses</div>
-              <div className="metric-value" style={{ color: 'var(--danger)' }}>
-                ${dashboardData.expenses.toFixed(2)}
-              </div>
-            </div>
-            <div className="metric-card slide-up" style={{ animationDelay: '0.2s' }}>
-              <div className="metric-label">Net</div>
-              <div className="metric-value" style={{ color: dashboardData.net >= 0 ? 'var(--success)' : 'var(--danger)' }}>
-                {dashboardData.net >= 0 ? '+' : ''}${dashboardData.net.toFixed(2)}
-              </div>
-            </div>
-            {dashboardData.savingsRate !== null && (
-              <div className="metric-card slide-up" style={{ animationDelay: '0.3s' }}>
-                <div className="metric-label">Savings Rate</div>
-                <div className="metric-value" style={{ color: 'var(--secondary)' }}>
-                  {dashboardData.savingsRate.toFixed(1)}%
+            {dashboardData.accountType === 'depository' && (
+              <>
+                <div className="metric-card slide-up">
+                  <div className="metric-label">Balance</div>
+                  <div className="metric-value" style={{ color: 'var(--primary)' }}>
+                    ${dashboardData.balance.toFixed(2)}
+                  </div>
+                  {dashboardData.viewType === 'combined' && dashboardData.accounts.length > 0 && (
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.5rem' }}>
+                      {dashboardData.accounts.length} account{dashboardData.accounts.length !== 1 ? 's' : ''}
+                    </div>
+                  )}
                 </div>
-              </div>
+                <div className="metric-card slide-up" style={{ animationDelay: '0.1s' }}>
+                  <div className="metric-label">Income</div>
+                  <div className="metric-value" style={{ color: 'var(--success)' }}>
+                    ${dashboardData.income.toFixed(2)}
+                  </div>
+                </div>
+                <div className="metric-card slide-up" style={{ animationDelay: '0.2s' }}>
+                  <div className="metric-label">Spend</div>
+                  <div className="metric-value" style={{ color: 'var(--danger)' }}>
+                    ${dashboardData.expenses.toFixed(2)}
+                  </div>
+                </div>
+                <div className="metric-card slide-up" style={{ animationDelay: '0.3s' }}>
+                  <div className="metric-label">Net</div>
+                  <div className="metric-value" style={{ color: dashboardData.net >= 0 ? 'var(--success)' : 'var(--danger)' }}>
+                    {dashboardData.net >= 0 ? '+' : ''}${dashboardData.net.toFixed(2)}
+                  </div>
+                </div>
+              </>
+            )}
+
+            {dashboardData.accountType === 'credit' && (
+              <>
+                <div className="metric-card slide-up">
+                  <div className="metric-label">Balance</div>
+                  <div className="metric-value" style={{ color: 'var(--danger)' }}>
+                    ${dashboardData.balance.toFixed(2)}
+                  </div>
+                  {dashboardData.creditLimit !== null && (
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.5rem' }}>
+                      Limit: ${dashboardData.creditLimit.toFixed(2)}
+                    </div>
+                  )}
+                </div>
+                <div className="metric-card slide-up" style={{ animationDelay: '0.1s' }}>
+                  <div className="metric-label">Spend</div>
+                  <div className="metric-value" style={{ color: 'var(--danger)' }}>
+                    ${dashboardData.expenses.toFixed(2)}
+                  </div>
+                </div>
+              </>
+            )}
+
+            {(dashboardData.accountType === 'investment' || dashboardData.accountType === 'loan') && (
+              <>
+                <div className="metric-card slide-up">
+                  <div className="metric-label">
+                    {dashboardData.accountType === 'investment' ? 'Balance' : 'Outstanding Balance'}
+                  </div>
+                  <div className="metric-value" style={{ color: 'var(--primary)' }}>
+                    ${dashboardData.balance.toFixed(2)}
+                  </div>
+                </div>
+                {dashboardData.balanceChange !== null && (
+                  <div className="metric-card slide-up" style={{ animationDelay: '0.1s' }}>
+                    <div className="metric-label">Change</div>
+                    <div className="metric-value" style={{ color: dashboardData.balanceChange >= 0 ? 'var(--success)' : 'var(--danger)' }}>
+                      {dashboardData.balanceChange >= 0 ? '+' : ''}${dashboardData.balanceChange.toFixed(2)}
+                    </div>
+                  </div>
+                )}
+              </>
             )}
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: '1.5rem' }}>
-          {/* Category Breakdown */}
-          {dashboardData.categoryBreakdown.length > 0 && (
-              <div className="card slide-up">
-                <h2 style={{ marginBottom: '1.5rem', fontSize: '1.5rem', fontWeight: 600 }}>
-                  Spending by Category
-                </h2>
-              <div>
-                  {dashboardData.categoryBreakdown.map((cat, idx) => (
-                    <div key={cat.category} className="category-item" style={{ animationDelay: `${idx * 0.05}s` }}>
-                      <span style={{ fontWeight: 500 }}>{cat.category}</span>
-                      <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>
-                      ${cat.amount.toFixed(2)}
-                    </span>
-                  </div>
-                ))}
-              </div>
+          {/* Category Breakdown and Changes - Only for depository accounts */}
+          {dashboardData.accountType === 'depository' && (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: '1.5rem' }}>
+              {/* Category Breakdown */}
+              {dashboardData.categoryBreakdown.length > 0 && (
+            <div className="card slide-up">
+              <h2 style={{ marginBottom: '1.5rem', fontSize: '1.5rem', fontWeight: 600 }}>
+                Spending by Category
+              </h2>
+              {(() => {
+                const total = dashboardData.categoryBreakdown.reduce((sum, cat) => sum + cat.amount, 0)
+                const pieData = dashboardData.categoryBreakdown.map((cat) => ({
+                  category: cat.category,
+                  amount: cat.amount,
+                  percentage: (cat.amount / total) * 100,
+                }))
+                return <PieChart data={pieData} size={300} />
+              })()}
             </div>
           )}
 
@@ -334,10 +466,11 @@ export default function DashboardPage() {
                   })}
                     </div>
               </div>
-            )}
+              )}
             </div>
+          )}
 
-          {dashboardData.categoryBreakdown.length === 0 && dashboardData.changes.length === 0 && (
+          {dashboardData.accountType === 'depository' && dashboardData.categoryBreakdown.length === 0 && dashboardData.changes.length === 0 && (
             <div className="card">
               <p style={{ color: 'var(--text-secondary)', textAlign: 'center', padding: '2rem' }}>
                 No data available for this month. Sync your transactions to see insights.
